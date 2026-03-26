@@ -3,10 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Registro de Asistencia</title>
+    <title>Registro de Asistencia - Visor de Errores</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        /* (mismo CSS que antes) */
         :root {
             --primary: #4361ee;
             --primary-dark: #3a56d4;
@@ -123,6 +122,24 @@
         .justify-center { justify-content: center; }
         .gap-2 { gap: 0.5rem; }
         .opacity-50 { opacity: 0.5; }
+        /* Estilo para el bloque de error completo */
+        .error-detail {
+            background: #f8f9fa;
+            border-radius: 14px;
+            padding: 12px;
+            margin-top: 8px;
+            font-family: 'SF Mono', 'Menlo', monospace;
+            font-size: 0.85rem;
+            white-space: pre-wrap;
+            word-break: break-word;
+            border: 1px solid #f1e2e1;
+            color: #b91c1c;
+            overflow-x: auto;
+        }
+        pre {
+            margin: 0;
+            font-family: inherit;
+        }
     </style>
 </head>
 <body>
@@ -151,10 +168,24 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <script>
-    const API_URL = "https://script.google.com/macros/s/AKfycbyCXPCs06-EdQXGbWefl4d8z42kNo4huY7Si5xEGj8cy1SwRpTQGwOy3Pk47sqf1nQM/exec"; // Reemplaza con tu URL
+    // ================= CONFIGURACIÓN =================
+    // Reemplaza con tu URL real del API (Google Apps Script)
+    const API_URL = "https://script.google.com/macros/s/AKfycbyCXPCs06-EdQXGbWefl4d8z42kNo4huY7Si5xEGj8cy1SwRpTQGwOy3Pk47sqf1nQM/exec";
     let scanPaused = false;
     let lastScanTime = 0;
 
+    // Helper: Escapar HTML para evitar XSS en mensajes de error crudos
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    // Mostrar fecha/hora en tiempo real
     function updateDateTime() {
         const now = new Date();
         document.getElementById('current-time').innerText = now.toLocaleTimeString('es-PE');
@@ -163,10 +194,18 @@
     updateDateTime();
     setInterval(updateDateTime, 1000);
 
+    /**
+     * Muestra notificación de éxito o error.
+     * @param {boolean} success - true si fue éxito, false si error.
+     * @param {object|string} data - Para éxito: objeto con datos del alumno/asistencia.
+     *                                Para error: puede ser objeto con campo 'error' o texto crudo, o cualquier estructura.
+     */
     function showMessage(success, data) {
         const resultDiv = document.getElementById('resultado');
         resultDiv.style.display = 'block';
+
         if (success) {
+            // ÉXITO: mostrar información del estudiante y asistencia
             resultDiv.className = 'notification success';
             resultDiv.innerHTML = `
                 <div class="d-flex gap-2 mb-2">
@@ -175,15 +214,15 @@
                 </div>
                 <div class="info-row">
                     <span class="info-label">Estudiante</span>
-                    <span>${data.alumno.nombres} ${data.alumno.apellidos}</span>
+                    <span>${escapeHtml(data.alumno?.nombres || '')} ${escapeHtml(data.alumno?.apellidos || '')}</span>
                 </div>
                 <div class="info-row">
                     <span class="info-label">Grado/Sección</span>
-                    <span>${data.alumno.grado} - ${data.alumno.seccion}</span>
+                    <span>${escapeHtml(data.alumno?.grado || '')} - ${escapeHtml(data.alumno?.seccion || '')}</span>
                 </div>
                 <div class="info-row">
                     <span class="info-label">Hora</span>
-                    <span>${data.asistencia.hora}</span>
+                    <span>${escapeHtml(data.asistencia?.hora || '')}</span>
                 </div>
                 <div class="text-center mt-3">
                     <small class="text-muted">Reanudando en 3 segundos...</small>
@@ -194,13 +233,45 @@
                 scanPaused = false;
             }, 3000);
         } else {
+            // ERROR: mostrar EL ERROR COMPLETO tal cual viene del API (sin ocultar detalles)
+            let errorFullText = '';
+            
+            // Caso 1: data es una cadena de texto (ej. error de conexión simple)
+            if (typeof data === 'string') {
+                errorFullText = data;
+            } 
+            // Caso 2: data es un objeto con campo 'error' (string)
+            else if (data && typeof data === 'object') {
+                if (data.error && typeof data.error === 'string') {
+                    errorFullText = data.error;
+                } 
+                // Si el objeto tiene otro campo o es una estructura compleja, mostramos el JSON completo
+                else {
+                    try {
+                        errorFullText = JSON.stringify(data, null, 2);
+                    } catch (e) {
+                        errorFullText = String(data);
+                    }
+                }
+            } 
+            // Caso 3: cualquier otro tipo (número, etc)
+            else {
+                errorFullText = String(data);
+            }
+            
+            // Escapamos para evitar inyecciones, pero preservamos el formato
+            const safeError = escapeHtml(errorFullText);
+            
             resultDiv.className = 'notification error';
             resultDiv.innerHTML = `
                 <div class="d-flex gap-2 mb-2">
                     <i class="fas fa-exclamation-triangle" style="color: var(--danger); font-size: 1.5rem;"></i>
-                    <h5 class="mb-0">Error</h5>
+                    <h5 class="mb-0">Error desde el servidor / API</h5>
                 </div>
-                <p>${data.error}</p>
+                <div class="error-detail">
+                    <strong><i class="fas fa-code"></i> Respuesta completa:</strong>
+                    <pre style="margin-top: 8px; font-size: 0.8rem; line-height: 1.4;">${safeError}</pre>
+                </div>
                 <div class="text-center mt-3">
                     <small class="text-muted">Reintentando en 5 segundos...</small>
                 </div>
@@ -210,50 +281,84 @@
                 scanPaused = false;
             }, 5000);
         }
+        
+        // Pausar el escáner mientras se muestra el mensaje
         scanPaused = true;
     }
 
+    // Llamada al API cuando se detecta un código QR
     function onScanSuccess(decodedText) {
         if (scanPaused) return;
+        
         const now = Date.now();
-        if (now - lastScanTime < 3000) return;
+        if (now - lastScanTime < 3000) return; // debounce simple
         lastScanTime = now;
-
+        
         const statusSpan = document.getElementById('status-text');
-        statusSpan.innerText = 'Procesando...';
-
-        // Envío con application/x-www-form-urlencoded (evita preflight CORS)
+        statusSpan.innerText = 'Procesando petición...';
+        
+        // Envío POST con formato application/x-www-form-urlencoded (evita CORS preflight)
         fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'uuid=' + encodeURIComponent(decodedText)
         })
-        .then(response => response.json())
+        .then(async response => {
+            // Intentamos parsear la respuesta como JSON, si falla mostramos el texto crudo
+            const contentType = response.headers.get('content-type');
+            let responseData;
+            if (contentType && contentType.includes('application/json')) {
+                responseData = await response.json();
+            } else {
+                // Si no es JSON, obtenemos el texto plano (posible error HTML o texto)
+                const textBody = await response.text();
+                responseData = { success: false, error: `Respuesta no JSON (HTTP ${response.status}): ${textBody.substring(0, 500)}` };
+            }
+            return responseData;
+        })
         .then(data => {
-            if (data.success) {
+            // Verificar si la API indica éxito (depende de la estructura que devuelva)
+            // Se espera que el API devuelva { success: true, alumno: {...}, asistencia: {...} }
+            // o { success: false, error: "mensaje" }.
+            if (data && data.success === true) {
+                // Éxito: mostrar los datos completos del alumno
                 showMessage(true, data);
                 // Sonido opcional (si el navegador lo permite)
-                new Audio('https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3').play().catch(e=>console.log);
+                try {
+                    new Audio('https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3').play().catch(e => console.log("Sonido bloqueado"));
+                } catch(e) {}
             } else {
+                // Error devuelto por el API: mostramos el objeto completo que vino del servidor
+                // Esto garantiza ver el mensaje de error exacto, incluyendo campos adicionales.
                 showMessage(false, data);
             }
         })
         .catch(err => {
-            console.error(err);
-            showMessage(false, { error: 'Error de conexión: ' + err.message });
+            console.error("Network/parse error:", err);
+            // Error de red o de parsing: mostramos el error técnico completo
+            const errorDetails = {
+                tipo: "Error de conexión o red",
+                mensaje: err.message,
+                stack: err.stack ? err.stack.split('\n')[0] : 'no stack',
+                timestamp: new Date().toISOString()
+            };
+            showMessage(false, errorDetails);
         })
         .finally(() => {
             statusSpan.innerText = 'Esperando código QR...';
         });
     }
 
+    // Función opcional para errores del lector (no crítica)
     function onScanError(errorMessage) {
-        // Opcional: puedes mostrar un mensaje si pasa mucho tiempo sin escanear
+        // Silencioso para no molestar, solo en consola si es necesario
+        // console.debug("Scan error (ignorado):", errorMessage);
     }
 
+    // Inicializar escáner HTML5-QR
     const html5QrCode = new Html5QrcodeScanner(
         "qr-reader",
-        { fps: 10, qrbox: { width: 260, height: 260 }, aspectRatio: 1.0 },
+        { fps: 10, qrbox: { width: 260, height: 260 }, aspectRatio: 1.0, disableFlip: false },
         false
     );
     html5QrCode.render(onScanSuccess, onScanError);
