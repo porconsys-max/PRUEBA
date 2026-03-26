@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Registro de Asistencia</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        :root {
+            --primary: #4361ee;
+            --primary-dark: #3a56d4;
+            --success: #10b981;
+            --danger: #ef4444;
+            --text: #1e293b;
+            --bg-surface: #ffffff;
+            --border-color: #e2e8f0;
+        }
+        body {
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+            background: #f8fafc;
+            margin: 0;
+            padding: 20px;
+            color: var(--text);
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        .card {
+            background: var(--bg-surface);
+            border-radius: 24px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+            padding: 20px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 20px;
+        }
+        .scanner-status {
+            background: var(--primary);
+            color: white;
+            border-radius: 50px;
+            padding: 6px 20px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+        .pulse {
+            width: 10px;
+            height: 10px;
+            background: white;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255,255,255,0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(255,255,255,0); }
+            100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+        }
+        #qr-reader {
+            border: none;
+            border-radius: 20px;
+            overflow: hidden;
+            background: #f1f5f9;
+        }
+        #qr-reader video {
+            border-radius: 16px;
+            max-height: 350px;
+            object-fit: cover;
+        }
+        .notification {
+            border-radius: 20px;
+            padding: 20px;
+            margin-top: 20px;
+            animation: slideUp 0.3s ease;
+        }
+        .success {
+            background: #e6f4ea;
+            border-left: 6px solid var(--success);
+        }
+        .error {
+            background: #fce8e6;
+            border-left: 6px solid var(--danger);
+        }
+        .info-row {
+            display: flex;
+            gap: 12px;
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .info-label {
+            font-weight: 700;
+            width: 100px;
+            color: #64748b;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .btn {
+            display: inline-block;
+            background: #f1f5f9;
+            color: var(--text);
+            border: 1px solid var(--border-color);
+            border-radius: 40px;
+            padding: 10px 20px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: 0.2s;
+        }
+        .btn:hover {
+            background: #e2e8f0;
+        }
+        .text-center {
+            text-align: center;
+        }
+        .mt-3 { margin-top: 1rem; }
+        .mb-2 { margin-bottom: 0.5rem; }
+        .mb-4 { margin-bottom: 1.5rem; }
+        .d-flex { display: flex; align-items: center; gap: 8px; }
+        .justify-center { justify-content: center; }
+        .gap-2 { gap: 0.5rem; }
+        .opacity-50 { opacity: 0.5; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <div class="scanner-status">
+            <div class="pulse"></div>
+            <span id="status-text">Esperando código QR...</span>
+        </div>
+        <div id="qr-reader"></div>
+    </div>
+
+    <div id="resultado" style="display: none;" class="notification"></div>
+
+    <div class="text-center mt-3">
+        <div class="d-flex justify-center gap-2 mb-4">
+            <span><i class="far fa-clock"></i> <span id="current-time">--:--:--</span></span>
+            <span class="opacity-50">|</span>
+            <span><i class="far fa-calendar-alt"></i> <span id="current-date"></span></span>
+        </div>
+        <a href="#" class="btn" onclick="location.reload(); return false;">
+            <i class="fas fa-sync-alt"></i> Reiniciar escáner
+        </a>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script>
+    const API_URL = "https://script.google.com/macros/s/AKfycbw_.../exec"; // Reemplaza con tu URL
+    let scanPaused = false;
+    let lastScanTime = 0;
+
+    // Actualizar fecha y hora en tiempo real
+    function updateDateTime() {
+        const now = new Date();
+        document.getElementById('current-time').innerText = now.toLocaleTimeString('es-PE');
+        document.getElementById('current-date').innerText = now.toLocaleDateString('es-PE', { year: 'numeric', month: 'long', day: 'numeric' });
+    }
+    updateDateTime();
+    setInterval(updateDateTime, 1000);
+
+    function showMessage(success, data) {
+        const resultDiv = document.getElementById('resultado');
+        resultDiv.style.display = 'block';
+        if (success) {
+            resultDiv.className = 'notification success';
+            resultDiv.innerHTML = `
+                <div class="d-flex gap-2 mb-2">
+                    <i class="fas fa-check-circle" style="color: var(--success); font-size: 1.5rem;"></i>
+                    <h5 class="mb-0">¡Registro exitoso!</h5>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Estudiante</span>
+                    <span>${data.alumno.nombres} ${data.alumno.apellidos}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Grado/Sección</span>
+                    <span>${data.alumno.grado} - ${data.alumno.seccion}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Hora</span>
+                    <span>${data.asistencia.hora}</span>
+                </div>
+                <div class="text-center mt-3">
+                    <small class="text-muted">Reanudando en 3 segundos...</small>
+                </div>
+            `;
+            setTimeout(() => {
+                resultDiv.style.display = 'none';
+                scanPaused = false;
+            }, 3000);
+        } else {
+            resultDiv.className = 'notification error';
+            resultDiv.innerHTML = `
+                <div class="d-flex gap-2 mb-2">
+                    <i class="fas fa-exclamation-triangle" style="color: var(--danger); font-size: 1.5rem;"></i>
+                    <h5 class="mb-0">Error</h5>
+                </div>
+                <p>${data.error}</p>
+                <div class="text-center mt-3">
+                    <small class="text-muted">Reintentando en 5 segundos...</small>
+                </div>
+            `;
+            setTimeout(() => {
+                resultDiv.style.display = 'none';
+                scanPaused = false;
+            }, 5000);
+        }
+        scanPaused = true;
+    }
+
+    function onScanSuccess(decodedText) {
+        if (scanPaused) return;
+        const now = Date.now();
+        if (now - lastScanTime < 3000) return;
+        lastScanTime = now;
+
+        const statusSpan = document.getElementById('status-text');
+        statusSpan.innerText = 'Procesando...';
+
+        fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uuid: decodedText })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showMessage(true, data);
+                // Beep sound (opcional)
+                new Audio('https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3').play().catch(e=>console.log);
+            } else {
+                showMessage(false, data);
+            }
+        })
+        .catch(err => {
+            showMessage(false, { error: 'Error de conexión: ' + err.message });
+        })
+        .finally(() => {
+            statusSpan.innerText = 'Esperando código QR...';
+        });
+    }
+
+    function onScanError(errorMessage) {
+        // Solo mostramos si ha pasado mucho sin escanear
+        // (opcional)
+    }
+
+    const html5QrCode = new Html5QrcodeScanner(
+        "qr-reader",
+        { fps: 10, qrbox: { width: 260, height: 260 }, aspectRatio: 1.0 },
+        false
+    );
+    html5QrCode.render(onScanSuccess, onScanError);
+</script>
+</body>
+</html>
